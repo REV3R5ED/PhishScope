@@ -415,3 +415,102 @@ def auth_malformed_eml() -> bytes:
         b"Received-SPF: \r\n"
         b"Received-SPF: (no result token here)\r\n"
     )
+
+
+# ---------------------------------------------------------------------------
+# v0.4 URL/domain fixtures (hand-crafted byte strings)
+# ---------------------------------------------------------------------------
+
+_URLS_HTML = (
+    b"<html><body>\r\n"
+    b"<p>Dear customer, verify your account:</p>\r\n"
+    # display text is a URL that differs from the href target
+    b'<p><a href="https://secure-login.example.net/verify?id=9917">'
+    b"https://www.acme-invoices.net/verify</a></p>\r\n"
+    # shortener link with plain-text anchor
+    b'<p><a href="https://bit.ly/3xYzAb12">track your shipment</a></p>\r\n'
+    # tracking pixel on an IP literal with a non-standard port
+    b'<img src="http://192.0.2.44:8080/p.gif">\r\n'
+    b"</body></html>\r\n"
+)
+
+_URLS_TEXT = (
+    b"Dear customer,\r\n"
+    b"\r\n"
+    b"Your invoice is ready: https://billing.acme-invoices.net/inv/4821\r\n"
+    b"Mirror (IP literal): http://192.0.2.44/inv/4821\r\n"
+    b"Punycode portal: https://xn--pple-43d.example/verify\r\n"
+    b"Tracking: https://track.example.org/click?utm_source=mail&utm_medium=email"
+    b"&utm_campaign=inv&sid=9917&ts=1727874600&sig=abcdef123456\r\n"
+    b"Deep chain: https://a.b.c.d.example.com/deep/path\r\n"
+    b"Also see https://billing.acme-invoices.net/inv/4821 (repeated).\r\n"
+)
+
+
+def urls_variety_eml() -> bytes:
+    """URL variety: IP literal, punycode, mismatch, shortener, tracking,
+    deep subdomains, header URLs, repeated URLs, and an attachment whose
+    filename must never be treated as a URL."""
+    return (
+        b"From: Acme Corp Billing <billing@acme-invoices.net>\r\n"
+        b"To: victim@northwind.example\r\n"
+        b"Subject: Your invoice #INV-4821\r\n"
+        b"Date: Fri, 02 Oct 2026 14:30:00 +0000\r\n"
+        b"Message-ID: <urls-variety@example.net>\r\n"
+        b"List-Unsubscribe: <https://lists.acme-invoices.net/unsub?user=9917>\r\n"
+        b"Content-Type: multipart/mixed; boundary=URLSBOUNDARY\r\n"
+        b"\r\n"
+        b"--URLSBOUNDARY\r\n"
+        b"Content-Type: text/plain; charset=utf-8\r\n"
+        b"\r\n" + _URLS_TEXT + b"\r\n"
+        b"--URLSBOUNDARY\r\n"
+        b"Content-Type: text/html; charset=utf-8\r\n"
+        b"\r\n" + _URLS_HTML + b"\r\n"
+        b"--URLSBOUNDARY\r\n"
+        b"Content-Type: application/pdf\r\n"
+        b'Content-Disposition: attachment; filename="http-invoice.pdf"\r\n'
+        b"Content-Transfer-Encoding: base64\r\n"
+        b"\r\n"
+        b"JVBERi0xLjQK\r\n"
+        b"--URLSBOUNDARY--\r\n"
+    )
+
+
+def urls_defanged_eml() -> bytes:
+    """Body already contains defanged URLs (threat-report style)."""
+    return (
+        b"From: soc@example.org\r\n"
+        b"To: analyst@example.com\r\n"
+        b"Subject: IOCs from incident 42\r\n"
+        b"Date: Fri, 02 Oct 2026 15:00:00 +0000\r\n"
+        b"Message-ID: <urls-defanged@example.org>\r\n"
+        b"Content-Type: text/plain; charset=utf-8\r\n"
+        b"\r\n"
+        b"Observed indicators:\r\n"
+        b"hxxps://evil[.]example/login\r\n"
+        b"hxxp://bad[.]example:8080/x\r\n"
+        b"http[:]//weird[.]example/path\r\n"
+    )
+
+
+def urls_malformed_eml() -> bytes:
+    """Malformed URL shapes: must not crash, warnings recorded."""
+    return (
+        b"From: alice@example.com\r\n"
+        b"To: bob@example.com\r\n"
+        b"Subject: malformed urls\r\n"
+        b"Date: Fri, 02 Oct 2026 12:00:00 +0000\r\n"
+        b"Message-ID: <urls-malformed@example.com>\r\n"
+        b"Content-Type: text/plain; charset=utf-8\r\n"
+        b"\r\n"
+        b"bare scheme: http:// and that's it\r\n"
+        b"bad bracket: https://[bad\r\n"
+        b"bad port: http://example.com:abc/path\r\n"
+        b"not a url: just some words\r\n"
+        b"huge: https://example.com/" + b"a" * 3000 + b"\r\n"
+    )
+
+
+def urls_none_eml() -> bytes:
+    """A clean message with no URLs at all."""
+    return _with_headers(b"")
