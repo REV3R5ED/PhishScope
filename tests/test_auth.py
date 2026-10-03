@@ -322,7 +322,9 @@ def test_provenance():
     p = analysis.provenance.to_dict()
     assert p["parser_name"] == PARSER_NAME == "phishscope.auth"
     assert p["parser_version"] == PARSER_VERSION == "0.3.0"
-    assert p["phishscope_version"] == "0.4.0"
+    from phishscope import __version__
+
+    assert p["phishscope_version"] == __version__
     assert p["analyzed_at_utc"]
 
 
