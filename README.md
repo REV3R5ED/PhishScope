@@ -19,13 +19,28 @@ MIT — see [LICENSE](LICENSE). Free for personal and commercial use.
 - **Defanged display**: URLs in human-readable output are defanged (`hxxp://…[.]`) so they can't be followed by accident; `--json` carries exact values for tooling; long header values are truncated for display (full values in `--json`)
 - **CLI**: `phishscope analyze <message.eml> [--json] [--show-raw]`, `phishscope overview <message.eml> [--json]`, `phishscope --version`; structured exit codes (0 ok / 1 warnings / 2 error); deterministic JSON output; audit logging of every invocation; plugin registry with the `core` module (v0.1.0)
 
-See [docs/USAGE.md](docs/USAGE.md) for a scenario walkthrough.
+See [docs/USAGE.md](docs/USAGE.md) for scenario walkthroughs.
+
+## v0.2 — what works today
+
+- **Header forensics** (`phishscope hops message.eml`, `phishscope analyze --headers message.eml`): new `phishscope.headers` package (stdlib only). Parses every `Received` header into hops ordered oldest-to-newest — from/by host and IP (IPv4/IPv6 bracketed literals validated locally), protocol, queue ID, timestamp with verbatim original + UTC normalization
+- **Observation-only chain analysis**: hop counts, timestamp inversions, private/internal IPs in hops (RFC 1918/loopback/link-local/ULA/CGNAT — documentation ranges are *not* flagged), missing timestamps, unverifiable from-claims (hostname with no bracketed IP, noted as uncorroborated since no DNS is performed). Every observation carries its basis; none is a verdict
+- **Routing/auth-relevant header normalization**: Return-Path, Message-ID, Date (verbatim + UTC), X-Originating-IP / X-Sender-IP (recorded as observed claims), X-Mailer, User-Agent, List-* headers, MIME-Version, top-level Content-Type
+- **Safety**: same bounds as v0.1 (1 MB header block enforced before parsing); hostnames are never resolved, nothing is fetched — verified by dedicated no-network tests that block all sockets; malformed Received lines become recorded warnings, never crashes
+- **CLI**: `hops` renders the hop timeline oldest→newest with observations; `analyze --headers` appends a routing-headers section and merges a `headers` block (with its own provenance, `phishscope.headers` v0.2.0) into `--json`; plugin registry gains the `headers` module (v0.2.0)
+
+## v0.3 — what works today
+
+- **Authentication analysis** (`phishscope auth message.eml`, `phishscope analyze --headers message.eml`): new `phishscope.auth` package (stdlib only). Parses `Authentication-Results` (multiple headers, per-method result tokens, reasons, `smtp.mailfrom` / `header.i` / `header.from` properties), `DKIM-Signature` (d=/s=/a=/c=/h=/bh= tags recorded verbatim), and `Received-SPF` — all as *claims*, never as verified facts
+- **Observation-only auth forensics**: per-method result observations (`spf-pass`, `dkim-none`, `dmarc-fail`, …), DKIM-signature-present/absent, conflicting Authentication-Results across hops, Received-SPF vs Authentication-Results disagreements, and DMARC-style alignment (strict exact-match + relaxed organizational-domain match) — every observation carries its basis; none is a verdict
+- **Honest offline boundary**: **no DNS lookups are ever performed** — no SPF record fetching, no DKIM public-key retrieval, no DMARC policy fetching — and DKIM signatures are **never cryptographically verified**. An `spf=pass` means "the MTA that wrote the header claimed SPF passed". Forwarding and mailing lists routinely break SPF/DKIM alignment, so alignment observations describe the claim geometry, not legitimacy. Verified by dedicated no-network tests that block all sockets
+- **CLI**: `auth` renders the focused authentication view with the offline boundary stated up front; `analyze --headers` appends an authentication section and merges an `authentication` block (with its own provenance, `phishscope.auth` v0.3.0) into `--json`; plugin registry gains the `auth` module (v0.3.0)
 
 ## Roadmap
 
 - [x] **v0.1** — Safe .eml/MIME parser, hashes, raw preservation, normalized message model
-- [ ] **v0.2** — Header & Received-chain forensics (ordered Received chain, display-name/address mismatches, IPv4/IPv6/domain indicators)
-- [ ] **v0.3** — SPF/DKIM/DMARC analysis (Authentication-Results parsing, pass/fail/none + authenticating domain)
+- [x] **v0.2** — Header & Received-chain forensics (ordered Received chain, observation-only analysis, IPv4/IPv6/domain indicators)
+- [x] **v0.3** — SPF/DKIM/DMARC analysis (Authentication-Results parsing, pass/fail/none + authenticating domain; fully offline, no signature verification)
 - [ ] **v0.4** — URL/domain extraction & triage (visible URLs, href targets, defanged indicators, display-vs-destination mismatch; no auto-visiting)
 - [ ] **v0.5** — Attachment forensics (magic-byte type, extension/type mismatch, double extensions, risky types, archive inventory with strict limits; never execute)
 - [ ] **v0.6** — Content & impersonation heuristics (urgency/credential/payment language, brand/domain mismatch; findings carry evidence + limitations)
@@ -47,11 +62,13 @@ PhishScope treats every message as hostile input:
 
 See [SECURITY.md](SECURITY.md) for the full policy.
 
-## Limitations (v0.1)
+## Limitations (v0.3)
 
-- URL extraction, authentication analysis, header forensics, and attachment content inspection are later phases — v0.1 inventories structure only.
+- URL extraction, attachment content inspection, and impersonation heuristics are later phases — v0.3 adds authentication claims only.
+- Authentication results are **header claims, not independent verification**: PhishScope performs no DNS lookups and never verifies DKIM signatures cryptographically. A `pass` in an Authentication-Results header is only as trustworthy as the MTA that wrote it (headers can be forged by the sender's own infrastructure).
+- Relaxed DMARC alignment uses a naive last-two-labels organizational-domain approximation (no public-suffix list offline); strict alignment is exact-match and always reported alongside.
+- Forwarding, mailing lists, and sender rewriting routinely break SPF/DKIM alignment — alignment observations describe claim geometry, not legitimacy.
 - The parser is lenient by design (warnings, not rejections) for malformed input; only safety-bound violations are hard errors.
-- `Return-Path` / `Received` / `Authentication-Results` headers are preserved in raw bytes but not yet analyzed.
 
 ## Install
 

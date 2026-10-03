@@ -7,6 +7,13 @@ Received: from unknown (unknown [198.51.100.77])
 Received: from billing-pc (billing-pc [10.0.0.23])
 	by [10.0.0.23] with SMTP id z9Ghi789;
 	Fri, 02 Oct 2026 14:28:10 +0000
+Authentication-Results: mx.northwind.example;
+	spf=pass (sender IP is 203.0.113.45)
+	smtp.mailfrom=bounce-9917@acme-invoices.net;
+	dkim=none (no signature) header.d=none;
+	dmarc=fail (p=reject) header.from=acme-invoices.net
+Received-SPF: pass (mx.northwind.example: domain of bounce-9917@acme-invoices.net
+	designates 203.0.113.45 as permitted sender) client-ip=203.0.113.45;
 From: Acme Corp Billing <billing@acme-invoices.net>
 Reply-To: accounts@acme-billing-support.com
 To: Pouya Karim <pouya@northwind.example>
