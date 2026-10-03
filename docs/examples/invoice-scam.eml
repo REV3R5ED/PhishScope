@@ -1,0 +1,42 @@
+From: Acme Corp Billing <billing@acme-invoices.net>
+Reply-To: accounts@acme-billing-support.com
+To: Pouya Karim <pouya@northwind.example>
+Subject: URGENT: Past-due invoice #INV-4821 =?utf-8?b?4oCU?= wire transfer
+ required
+Date: Fri, 02 Oct 2026 14:30:00 +0000
+Message-ID: <inv-4821-urgent@acme-invoices.net>
+Return-Path: <bounce-9917@acme-invoices.net>
+Content-Type: multipart/mixed; boundary="===============7456464218993700107=="
+
+--===============7456464218993700107==
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+MIME-Version: 1.0
+
+Dear valued customer,
+
+Invoice #INV-4821 for $48,200.00 is now 30 days past due.
+Remit by wire transfer immediately to avoid service suspension.
+Payment details are in the attached invoice.
+
+Acme Corp Billing
+
+--===============7456464218993700107==
+Content-Type: text/html; charset="utf-8"
+Content-Transfer-Encoding: quoted-printable
+MIME-Version: 1.0
+
+<html><body><p>Dear valued customer,</p><p>Invoice <b>#INV-4821</b> for $48,2=
+00.00 is now 30 days past due.</p><p><a href=3D"http://acme-invoices.net/pay/=
+INV-4821">Pay now</a></p></body></html>
+
+--===============7456464218993700107==
+Content-Type: application/pdf
+Content-Transfer-Encoding: base64
+Content-Disposition: attachment; filename="Invoice_INV-4821.pdf"
+MIME-Version: 1.0
+
+JVBERi0xLjQKJSBzeW50aGV0aWMgaW52b2ljZSBieXRlcyBmb3IgZG9jdW1lbnRhdGlvbiBvbmx5
+Cg==
+
+--===============7456464218993700107==--
