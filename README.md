@@ -36,12 +36,21 @@ See [docs/USAGE.md](docs/USAGE.md) for scenario walkthroughs.
 - **Honest offline boundary**: **no DNS lookups are ever performed** — no SPF record fetching, no DKIM public-key retrieval, no DMARC policy fetching — and DKIM signatures are **never cryptographically verified**. An `spf=pass` means "the MTA that wrote the header claimed SPF passed". Forwarding and mailing lists routinely break SPF/DKIM alignment, so alignment observations describe the claim geometry, not legitimacy. Verified by dedicated no-network tests that block all sockets
 - **CLI**: `auth` renders the focused authentication view with the offline boundary stated up front; `analyze --headers` appends an authentication section and merges an `authentication` block (with its own provenance, `phishscope.auth` v0.3.0) into `--json`; plugin registry gains the `auth` module (v0.3.0)
 
+## v0.4 — what works today
+
+- **URL/domain extraction & triage** (`phishscope urls message.eml`, `phishscope analyze --urls message.eml`): new `phishscope.urls` package (stdlib only). Extracts URLs from body text, HTML link targets/visible text (structural `html.parser` parse — never rendered), and all header values; attachment filenames are never treated as URLs
+- **Local decomposition**: scheme/host/port/path/query/fragment, IDNA/punycode display forms, IP-literal detection (v4/v6), naive last-two-labels registered domain (documented PSL-free approximation — exact host always reported alongside), subdomain depth, TLD, non-standard ports, known-shortener recognition (local list)
+- **Observation-only URL forensics**: `display-href-mismatch`, `ip-literal-host`, `punycode-host`, `shortened-url`, `nonstandard-port`, `http-scheme`, `userinfo-present`, `many-query-params`, `deep-subdomain`, `defanged-in-source` — every observation carries its basis including the exact URL; none is a verdict. Query parameter values are evidence and are kept verbatim, never redacted
+- **Deduplication with provenance**: repeated sightings merge into one record naming each source (body part, HTML attribute, header) with repeat counts; defanged URLs in the source (`hxxp`, `[.]`, `[:]`) are recognized and normalized to their exact form
+- **Honest offline boundary**: URLs are never fetched, hostnames are never resolved, shorteners are never expanded — verified by dedicated no-network tests that block all sockets. Human output is always defanged; `--json` carries exact values for tooling
+- **CLI**: `urls` renders the focused inventory with the offline boundary stated up front; `analyze --urls` appends a URL section and merges a `urls` block (with its own provenance, `phishscope.urls` v0.4.0) into `--json`; plugin registry gains the `urls` module (v0.4.0)
+
 ## Roadmap
 
 - [x] **v0.1** — Safe .eml/MIME parser, hashes, raw preservation, normalized message model
 - [x] **v0.2** — Header & Received-chain forensics (ordered Received chain, observation-only analysis, IPv4/IPv6/domain indicators)
 - [x] **v0.3** — SPF/DKIM/DMARC analysis (Authentication-Results parsing, pass/fail/none + authenticating domain; fully offline, no signature verification)
-- [ ] **v0.4** — URL/domain extraction & triage (visible URLs, href targets, defanged indicators, display-vs-destination mismatch; no auto-visiting)
+- [x] **v0.4** — URL/domain extraction & triage (visible URLs, href targets, defanged indicators, display-vs-destination mismatch; no auto-visiting)
 - [ ] **v0.5** — Attachment forensics (magic-byte type, extension/type mismatch, double extensions, risky types, archive inventory with strict limits; never execute)
 - [ ] **v0.6** — Content & impersonation heuristics (urgency/credential/payment language, brand/domain mismatch; findings carry evidence + limitations)
 - [ ] **v0.7** — Threat-intel adapters (optional, cached, timeouts), indicator correlation, STIX/JSON export; observed vs enriched distinguished
@@ -62,13 +71,14 @@ PhishScope treats every message as hostile input:
 
 See [SECURITY.md](SECURITY.md) for the full policy.
 
-## Limitations (v0.3)
+## Limitations (v0.4)
 
-- URL extraction, attachment content inspection, and impersonation heuristics are later phases — v0.3 adds authentication claims only.
-- Authentication results are **header claims, not independent verification**: PhishScope performs no DNS lookups and never verifies DKIM signatures cryptographically. A `pass` in an Authentication-Results header is only as trustworthy as the MTA that wrote it (headers can be forged by the sender's own infrastructure).
-- Relaxed DMARC alignment uses a naive last-two-labels organizational-domain approximation (no public-suffix list offline); strict alignment is exact-match and always reported alongside.
-- Forwarding, mailing lists, and sender rewriting routinely break SPF/DKIM alignment — alignment observations describe claim geometry, not legitimacy.
-- The parser is lenient by design (warnings, not rejections) for malformed input; only safety-bound violations are hard errors.
+- Attachment content inspection and impersonation heuristics are later phases — v0.4 adds URL/domain triage only.
+- URLs are **never fetched, never resolved, never expanded**: a shortener's target is recorded as unobserved, not assumed benign or malicious. Hostnames are never resolved via DNS.
+- URL observations are **facts, not verdicts** — including `display-href-mismatch`, which is a strong phishing signal in practice but stays an observation until v0.6 heuristics (with explicit limitations).
+- Registered-domain uses a naive last-two-labels approximation (no public-suffix list offline); the exact host is always reported alongside.
+- Only `http`/`https` URLs are extracted; bare domains without a scheme are not treated as URLs. Attachment filenames are never treated as URLs.
+- Authentication results remain **header claims, not independent verification**: PhishScope performs no DNS lookups and never verifies DKIM signatures cryptographically.
 
 ## Install
 

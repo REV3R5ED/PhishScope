@@ -191,3 +191,62 @@ v0.3.0) is appended to the human output and merged into `--json`.
 - Displayed header values are truncated at 200 chars and URLs are
   defanged (`hxxp://…[.]`); `--json` always carries the full exact
   values.
+
+## Scenario: inventory the lure's URLs (v0.4)
+
+The invoice lure returns with links this time
+(`docs/examples/invoice-scam-urls.eml` — same lure, plus a payment
+portal, a "backup" portal, HTML buttons, and a List-Unsubscribe
+header). v0.4 extracts every URL from body text, HTML link targets,
+and headers, then decomposes each one locally — never fetched, never
+resolved, shorteners never expanded:
+
+```bash
+phishscope urls docs/examples/invoice-scam-urls.eml
+```
+
+![phishscope urls: URL/domain inventory of the invoice lure](images/04-urls.png)
+
+Read the inventory as observations, not verdicts:
+
+- **`display-href-mismatch`** — the "Pay now" button's clickable text
+  shows `portal.acme-invoices.net/pay/INV-4821` but the href target is
+  `secure-pay.example.net/collect?inv=4821`. This is the classic
+  phishing shape, and v0.4 still records it as an *observation*:
+  heuristic judgments arrive in v0.6 with explicit limitations.
+- **`ip-literal-host`** — the "backup portal" is `http://192.0.2.44/…`,
+  a bare IPv4 address instead of a domain name, on plaintext `http`
+  (`http-scheme`). Hostnames are easier to evaluate than bare
+  addresses.
+- **`shortened-url`** — `bit.ly/4kX9mQ2` is a known shortener; the
+  target is *not* expanded because PhishScope is offline, so the true
+  destination is recorded as unobserved.
+- **Header URL** — `List-Unsubscribe` carries
+  `portal.acme-invoices.net/unsub?user=9917`; query parameter values
+  are evidence and are kept verbatim, never redacted.
+- **Deduplication with provenance** — the payment portal appears in
+  both the text body and the HTML visible text; it is one record with
+  two sightings (each sighting counts its repeats).
+
+For the same data inside a full analysis, run `phishscope analyze
+--urls <file>`: a `urls` block (records, observations, URL parser
+warnings, provenance `phishscope.urls` v0.4.0) is appended to the
+human output and merged into `--json`. Human output is always
+defanged; `--json` carries exact values for tooling.
+
+## What v0.4 does NOT do (honest limits)
+
+- **No verdicts.** Observations are facts with their basis attached;
+  the analyst judges. Heuristics arrive in v0.6 with explicit
+  limitations.
+- **No fetching, no resolving, no expanding.** URLs are never
+  visited, hostnames are never resolved (no DNS), and shortened URLs
+  are never expanded — the target of a shortener is unobserved, not
+  assumed benign or malicious.
+- **No attachment content inspection** (v0.5) — attachment filenames
+  are never treated as URLs.
+- Registered-domain uses the naive last-two-labels approximation (no
+  public-suffix list offline — `co.uk`-style suffixes are not
+  handled); the exact host is always reported alongside.
+- Only `http`/`https` URLs are extracted; bare domains without a
+  scheme are not treated as URLs.

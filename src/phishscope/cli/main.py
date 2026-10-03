@@ -1,4 +1,4 @@
-"""PhishScope CLI: analyze / overview / hops / auth.
+"""PhishScope CLI: analyze / overview / hops / auth / urls.
 
 Every command renders human-readable text by default (``--json`` for
 automation), uses structured exit codes (0 ok / 1 parser warnings /
@@ -12,7 +12,9 @@ the original bytes behind an explicit safety banner. Header forensics
 never resolves hostnames and never fetches anything — observations
 describe what the headers claim, not what is true. Authentication
 analysis is fully offline: no DNS lookups, no DKIM key retrieval, no
-signature verification; results record header claims only.
+signature verification; results record header claims only. URL
+analysis is fully offline too: URLs are extracted and decomposed
+locally, never fetched, never resolved.
 """
 
 from __future__ import annotations
@@ -36,6 +38,8 @@ from phishscope.headers.analysis import analyze_headers
 from phishscope.headers.models import HeaderAnalysis
 from phishscope.parsers import safe_eml
 from phishscope.parsers.safe_eml import ParseError
+from phishscope.urls.analysis import analyze_urls
+from phishscope.urls.models import UrlAnalysis
 
 log = get_logger()
 
@@ -381,12 +385,125 @@ def render_auth_section(analysis: AuthAnalysis, cfg: AppConfig) -> str:
     if not d["auth_results"] and not d["dkim_signatures"] and not d["received_spf"]:
         lines.append("  (no authentication headers present)")
     lines.append("")
-    lines.append(
-        "  "
-        + _render_observations({"observations": d["observations"]}, cfg).replace(
-            "\n", "\n  "
-        )
-    )
+    lines.append("  " + _render_observations(d, cfg).replace("\n", "\n  "))
+    return "\n".join(lines)
+
+
+def _url_source_display(source: dict[str, Any]) -> str:
+    kind = source["kind"]
+    detail = source["detail"]
+    label = {
+        "body-text": f"body text (part {detail})",
+        "html-href": f"HTML link target ({detail})",
+        "html-src": f"HTML resource ({detail})",
+        "html-text": f"HTML visible text (part {detail})",
+        "header": f"header {detail}",
+    }.get(kind, f"{kind} ({detail})")
+    if source["defanged_in_source"]:
+        label += " [defanged in source]"
+    if source.get("count", 1) > 1:
+        label += f" ×{source['count']}"
+    return label
+
+
+def _render_url_observations(d: dict[str, Any], cfg: AppConfig) -> str:
+    """URL observations for human output — details are defanged.
+
+    Observation details quote exact URLs (e.g. display-href-mismatch
+    names the href); human output must never print a clickable URL,
+    so details go through the same defanging as any other display
+    text. ``--json`` keeps the exact values.
+    """
+    observations = d["observations"]
+    if not observations:
+        return "URL observations: none"
+    lines = ["URL observations — facts, not verdicts:"]
+    for obs in observations:
+        detail = defang_text(truncate(obs["detail"], cfg.display_truncate_len))
+        lines.append(f"  [•] {obs['code']}: {detail}")
+    return "\n".join(lines)
+
+
+def render_urls_human(analysis: UrlAnalysis, cfg: AppConfig) -> str:
+    """Focused URL/domain inventory: defanged display, local decomposition."""
+    d = analysis.to_dict()
+    lines = [
+        f"PhishScope v{__version__} — URL/domain inventory (offline)",
+        "",
+        f"Evidence ID : {d['evidence_id']}",
+        f"Source      : {d['source_path']}",
+        f"URLs        : {d['url_count']} unique",
+        "",
+        "OFFLINE BOUNDARY: URLs are extracted and decomposed locally —",
+        "never fetched, never resolved, shorteners never expanded.",
+        "",
+    ]
+    if not d["urls"]:
+        lines.append("No http(s) URLs observed in body, HTML, or headers.")
+    for u in d["urls"]:
+        lines.append(f"[url] {_disp(u['defanged'], cfg, defang=False)}")
+        lines.append(f"  scheme : {u['scheme']}")
+        host_line = f"  host   : {u['host']}"
+        if u["punycode"]:
+            host_line += f"  (IDNA: {_disp(u['host_unicode'], cfg, defang=False)})"
+        if u["host_is_ip"]:
+            host_line += f"  [IPv{u['ip_version']} literal]"
+        lines.append(host_line)
+        if u["port"] is not None:
+            port_note = " (non-standard)" if u["nonstandard_port"] else ""
+            lines.append(f"  port   : {u['port']}{port_note}")
+        if u["registered_domain"]:
+            lines.append(
+                f"  domain : {u['registered_domain']}  (naive last-two-labels)"
+            )
+        if u["path"]:
+            lines.append(f"  path   : {_disp(u['path'], cfg, defang=False)}")
+        if u["query_params"]:
+            names = ", ".join(n for n, _v in u["query_params"])
+            lines.append(
+                f"  query  : {len(u['query_params'])} param(s): "
+                f"{_disp(names, cfg, defang=False)}"
+            )
+        sources = "; ".join(_url_source_display(s) for s in u["sources"])
+        lines.append(f"  seen in: {_disp(sources, cfg, defang=False)}")
+        if u["observation_codes"]:
+            lines.append(f"  flags  : {', '.join(u['observation_codes'])}")
+        lines.append("")
+    lines.append(_render_url_observations(d, cfg))
+    url_warnings = d["parser_warnings"]
+    if url_warnings:
+        lines.append("")
+        lines.append(f"URL parser warnings ({len(url_warnings)}):")
+        for warn in url_warnings:
+            lines.append(
+                f"  [!] {warn['code']}: "
+                f"{truncate(warn['detail'], cfg.display_truncate_len)}"
+            )
+    return "\n".join(lines)
+
+
+def render_urls_section(analysis: UrlAnalysis, cfg: AppConfig) -> str:
+    """URL section appended to ``analyze --urls`` output."""
+    d = analysis.to_dict()
+    lines = [f"URLs ({d['url_count']} unique, offline — never fetched):"]
+    if not d["urls"]:
+        lines.append("  (none observed)")
+    for u in d["urls"]:
+        line = f"  {_disp(u['defanged'], cfg, defang=False)}"
+        extras = []
+        if u["host_is_ip"]:
+            extras.append("IP literal")
+        if u["punycode"]:
+            extras.append("punycode")
+        if u["shortener"]:
+            extras.append("shortener")
+        if u["nonstandard_port"]:
+            extras.append(f"port {u['port']}")
+        if extras:
+            line += f"  [{', '.join(extras)}]"
+        lines.append(line)
+    lines.append("")
+    lines.append("  " + _render_url_observations(d, cfg).replace("\n", "\n  "))
     return "\n".join(lines)
 
 
@@ -456,6 +573,7 @@ def cmd_analyze(args: argparse.Namespace, cfg: AppConfig) -> int:
     result, message, raw = _analyze(args.file, cfg)
     headers: HeaderAnalysis | None = None
     auth: AuthAnalysis | None = None
+    urls: UrlAnalysis | None = None
     if args.headers and result.status != "error":
         # Raw bytes are already in hand; header + auth analysis
         # re-derive from them (never from the normalized model) and
@@ -465,6 +583,12 @@ def cmd_analyze(args: argparse.Namespace, cfg: AppConfig) -> int:
         if result.message is not None:
             result.message["headers"] = headers.to_dict()
             result.message["authentication"] = auth.to_dict()
+    if args.urls and result.status != "error":
+        # Offline URL inventory: extracted and decomposed locally —
+        # never fetched, never resolved.
+        urls = analyze_urls(raw, args.file, cfg)
+        if result.message is not None:
+            result.message["urls"] = urls.to_dict()
     if args.json:
         print(json.dumps(result.to_dict(), indent=2, sort_keys=True))
     elif result.status == "error":
@@ -482,8 +606,13 @@ def cmd_analyze(args: argparse.Namespace, cfg: AppConfig) -> int:
             if auth is not None:
                 print()
                 print(render_auth_section(auth, cfg))
-    extra = (len(headers.parser_warnings) if headers else 0) + (
-        len(auth.parser_warnings) if auth else 0
+            if urls is not None:
+                print()
+                print(render_urls_section(urls, cfg))
+    extra = (
+        (len(headers.parser_warnings) if headers else 0)
+        + (len(auth.parser_warnings) if auth else 0)
+        + (len(urls.parser_warnings) if urls else 0)
     )
     code = _exit_for(result, extra)
     audit_log({"command": ["analyze", args.file], "exit": code})
@@ -542,6 +671,26 @@ def cmd_auth(args: argparse.Namespace, cfg: AppConfig) -> int:
     return code
 
 
+def cmd_urls(args: argparse.Namespace, cfg: AppConfig) -> int:
+    result, _message, raw = _analyze(args.file, cfg)
+    result.command = "urls"
+    analysis: UrlAnalysis | None = None
+    if result.status != "error":
+        # Offline: URLs are extracted and decomposed locally — never
+        # fetched, never resolved, shorteners never expanded.
+        analysis = analyze_urls(raw, args.file, cfg)
+        result.message = {"urls": analysis.to_dict()}
+    if args.json:
+        print(json.dumps(result.to_dict(), indent=2, sort_keys=True))
+    elif result.status == "error":
+        print(f"phishscope: error: {'; '.join(result.errors)}", file=sys.stderr)
+    elif analysis is not None:
+        print(render_urls_human(analysis, cfg))
+    code = _exit_for(result, len(analysis.parser_warnings) if analysis else 0)
+    audit_log({"command": ["urls", args.file], "exit": code})
+    return code
+
+
 # ---------------------------------------------------------------------------
 # Argument parsing
 # ---------------------------------------------------------------------------
@@ -587,6 +736,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="include header forensics: normalized routing headers and the "
         "Received chain (oldest-to-newest) with observation-only analysis",
     )
+    p_analyze.add_argument(
+        "--urls",
+        action="store_true",
+        help="include URL/domain inventory: locally extracted and "
+        "decomposed URLs (never fetched, never resolved) with "
+        "observation-only analysis",
+    )
     p_analyze.set_defaults(func=cmd_analyze)
 
     p_overview = sub.add_parser(
@@ -614,6 +770,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_auth.add_argument("file", help="path to the .eml / RFC 5322 message")
     p_auth.set_defaults(func=cmd_auth)
+
+    p_urls = sub.add_parser(
+        "urls",
+        parents=[common],
+        help="focused URL/domain inventory: URLs extracted from body "
+        "text, HTML links, and headers, decomposed locally with "
+        "observation-only analysis (never fetched, never resolved)",
+    )
+    p_urls.add_argument("file", help="path to the .eml / RFC 5322 message")
+    p_urls.set_defaults(func=cmd_urls)
 
     return parser
 

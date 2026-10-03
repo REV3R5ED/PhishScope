@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "phishscope"
-version = "0.3.0"
+version = "0.4.0"
 description = "PhishScope — email and phishing forensics (v0.3: SPF/DKIM/DMARC authentication analysis (offline))"
 readme = "README.md"
 requires-python = ">=3.10"

@@ -5,6 +5,53 @@ All notable changes to PhishScope are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-10-03
+
+URL/domain extraction & triage, fully offline (plan Phase 4).
+
+### Added
+- New `phishscope.urls` package (stdlib only): `models`
+  (UrlRecord / UrlSource / UrlObservation / UrlAnalysis), `defang`
+  (defang/undefang, defanged-source recognition, URL candidate
+  regex), `decompose` (local URL decomposition: scheme/host/port/
+  path/query/fragment, IDNA display forms, IP-literal detection,
+  naive last-two-labels registered domain, shortener list, dedup
+  keys), `extract` (read-only candidate extraction from raw bytes:
+  text parts, structural HTML parsing via `html.parser`, all header
+  values; attachment parts skipped), `observations`
+  (observation-only forensics), `analysis` (whole-message URL
+  analysis).
+- Observation-only URL forensics (facts with basis, never verdicts):
+  `display-href-mismatch`, `ip-literal-host`, `punycode-host`,
+  `shortened-url` (target never expanded — offline), `nonstandard-
+  port`, `http-scheme`, `userinfo-present`, `many-query-params`,
+  `deep-subdomain`, `defanged-in-source`, `url-count`/`no-urls`.
+  Query parameter values are evidence — kept verbatim, never
+  redacted.
+- Deduplication with per-URL provenance: repeated sightings merge
+  into one record naming each source (body part, HTML attribute,
+  header) with repeat counts; defanged spellings in the source
+  (`hxxp`, `[.]`, `[:]`) are recognized and normalized to the exact
+  URL for the canonical record.
+- Offline boundary: URLs are never fetched, hostnames are never
+  resolved, shorteners are never expanded; HTML is parsed
+  structurally and never rendered. Verified by dedicated no-network
+  tests that block all sockets.
+- CLI: `phishscope urls <file.eml> [--json]` (focused inventory with
+  the offline boundary stated up front; human output always
+  defanged, `--json` carries exact values); `analyze --urls` appends
+  a URL section and merges a `urls` block (provenance
+  `phishscope.urls` v0.4.0) into `--json`; plugin registry gains the
+  `urls` module (v0.4.0).
+- Fixtures: URL variety (IP literal, punycode, display/href
+  mismatch, shortener, tracking params, deep subdomains, header
+  URLs, repeated URLs), defanged-source, malformed URLs,
+  URL-free message; docs example `docs/examples/invoice-scam-urls.eml`
+  (BEC lure with the classic mismatch shape) and terminal screenshot
+  `docs/images/04-urls.png`.
+- Extraction caps (documented): 50 text parts, 1 MB decoded text per
+  part, 2,000 URL candidates — caps record warnings, never crashes.
+
 ## [0.3.0] — 2026-10-03
 
 SPF/DKIM/DMARC authentication analysis, fully offline (plan Phase 3).

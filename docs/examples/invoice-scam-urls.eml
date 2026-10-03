@@ -1,0 +1,47 @@
+Received: from mail.acme-invoices.net (mail.acme-invoices.net [203.0.113.45])
+	by mx.northwind.example with ESMTPS id q3Kabc123;
+	Fri, 02 Oct 2026 14:31:02 +0000
+Received: from unknown (unknown [198.51.100.77])
+	by mail.acme-invoices.net with ESMTP id x7Ydef456;
+	Fri, 02 Oct 2026 14:29:44 +0000
+From: Acme Corp Billing <billing@acme-invoices.net>
+Reply-To: accounts@acme-billing-support.com
+To: Pouya Karim <pouya@northwind.example>
+Subject: URGENT: Past-due invoice #INV-4821 — wire transfer required
+Date: Fri, 02 Oct 2026 14:30:00 +0000
+Message-ID: <inv-4821-urls@acme-invoices.net>
+Return-Path: <bounce-9917@acme-invoices.net>
+X-Mailer: AcmeBillingMailer 2.4
+List-Unsubscribe: <https://portal.acme-invoices.net/unsub?user=9917>
+Content-Type: multipart/mixed; boundary="===============URLS4821=="
+
+--===============URLS4821==
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+MIME-Version: 1.0
+
+Dear valued customer,
+
+Invoice #INV-4821 for $48,200.00 is now 30 days past due.
+Pay securely online: https://portal.acme-invoices.net/pay/INV-4821
+Backup portal: http://192.0.2.44/pay/INV-4821
+
+Acme Corp Billing
+
+--===============URLS4821==
+Content-Type: text/html; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+MIME-Version: 1.0
+
+<html><body><p>Dear valued customer,</p><p>Invoice <b>#INV-4821</b> for $48,200.00 is now 30 days past due.</p><p><a href="https://secure-pay.example.net/collect?inv=4821">https://portal.acme-invoices.net/pay/INV-4821</a></p><p>Track delivery: <a href="https://bit.ly/4kX9mQ2">shipment status</a></p></body></html>
+
+--===============URLS4821==
+Content-Type: application/pdf
+Content-Transfer-Encoding: base64
+Content-Disposition: attachment; filename="Invoice_INV-4821.pdf"
+MIME-Version: 1.0
+
+JVBERi0xLjQKJSBzeW50aGV0aWMgaW52b2ljZSBieXRlcyBmb3IgZG9jdW1lbnRhdGlvbiBvbmx5
+Cg==
+
+--===============URLS4821==--

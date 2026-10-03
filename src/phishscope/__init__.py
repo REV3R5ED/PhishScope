@@ -20,13 +20,18 @@ v0.3: authentication analysis — SPF/DKIM/DMARC header parsing
 (Authentication-Results, DKIM-Signature, Received-SPF) with
 observation-only alignment. Fully offline: no DNS, no signature
 verification; everything describes what the headers claim.
+
+v0.4: URL/domain extraction and triage — URLs from body text, HTML
+links, and headers, decomposed locally with observation-only
+analysis. Fully offline: never fetched, never resolved, shorteners
+never expanded; observations are facts, never verdicts.
 """
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 __author__ = "Pouya Shini Karim"
 __license__ = "MIT"
 
-from phishscope import auth, headers, parsers
+from phishscope import auth, headers, parsers, urls
 from phishscope.core import config, hashing, logging, models, plugins, results
 
 __all__ = [
@@ -40,4 +45,5 @@ __all__ = [
     "parsers",
     "plugins",
     "results",
+    "urls",
 ]
