@@ -212,3 +212,206 @@ def format_date_for_header() -> str:
     return email.utils.format_datetime(
         datetime.datetime.now(datetime.timezone.utc), usegmt=False
     )
+
+
+# ---------------------------------------------------------------------------
+# v0.2 header-forensics fixtures (hand-crafted byte strings)
+# ---------------------------------------------------------------------------
+
+_HDR_BASE = (
+    b"From: sender@example.net\r\n"
+    b"To: victim@example.com\r\n"
+    b"Subject: headers test\r\n"
+    b"Date: Fri, 02 Oct 2026 14:30:00 +0000\r\n"
+    b"Message-ID: <hdr-test@example.net>\r\n"
+    b"Return-Path: <bounce@example.net>\r\n"
+    b"MIME-Version: 1.0\r\n"
+    b"Content-Type: text/plain; charset=utf-8\r\n"
+)
+
+
+def _with_headers(extra: bytes) -> bytes:
+    return extra + _HDR_BASE + b"\r\n" + b"body\r\n"
+
+
+def direct_send_eml() -> bytes:
+    """Clean two-hop chain, oldest first in time."""
+    return _with_headers(
+        b"Received: from mail.example.net (mail.example.net [192.0.2.10])\r\n"
+        b"\tby mx.example.com with ESMTPS id AAA111;\r\n"
+        b"\tFri, 02 Oct 2026 14:31:00 +0000\r\n"
+        b"Received: from client.example.net ([192.0.2.25])\r\n"
+        b"\tby mail.example.net with ESMTP id BBB222;\r\n"
+        b"\tFri, 02 Oct 2026 14:30:05 +0000\r\n"
+    )
+
+
+def mailing_list_eml() -> bytes:
+    """Forwarded via a mailing list: List-* headers, three hops."""
+    return _with_headers(
+        b"Received: from mail.example.net (mail.example.net [192.0.2.10])\r\n"
+        b"\tby mx.example.com with ESMTPS id CCC333;\r\n"
+        b"\tFri, 02 Oct 2026 15:01:00 +0000\r\n"
+        b"Received: from lists.example.org (lists.example.org [203.0.113.9])\r\n"
+        b"\tby mail.example.net with ESMTP id DDD444;\r\n"
+        b"\tFri, 02 Oct 2026 15:00:10 +0000\r\n"
+        b"Received: from poster.example.org ([198.51.100.60])\r\n"
+        b"\tby lists.example.org with ESMTP id EEE555;\r\n"
+        b"\tFri, 02 Oct 2026 14:59:00 +0000\r\n"
+        b"List-Id: <announce.example.org>\r\n"
+        b"List-Unsubscribe: <mailto:leave@example.org>\r\n"
+        b"X-Mailer: ListManager 9.1\r\n"
+    )
+
+
+def timestamp_inversion_eml() -> bytes:
+    """Middle hop timestamp is newer than the final hop (clock skew)."""
+    return _with_headers(
+        b"Received: from mail.example.net (mail.example.net [192.0.2.10])\r\n"
+        b"\tby mx.example.com with ESMTPS id FFF666;\r\n"
+        b"\tFri, 02 Oct 2026 14:31:00 +0000\r\n"
+        b"Received: from client.example.net ([192.0.2.25])\r\n"
+        b"\tby mail.example.net with ESMTP id GGG777;\r\n"
+        b"\tFri, 02 Oct 2026 14:35:00 +0000\r\n"
+    )
+
+
+def private_ip_hop_eml() -> bytes:
+    """First hop originates from a private (RFC 1918) address."""
+    return _with_headers(
+        b"Received: from mail.example.net (mail.example.net [192.0.2.10])\r\n"
+        b"\tby mx.example.com with ESMTPS id HHH888;\r\n"
+        b"\tFri, 02 Oct 2026 14:31:00 +0000\r\n"
+        b"Received: from internal-pc (internal-pc [192.168.1.10])\r\n"
+        b"\tby mail.example.net with ESMTP id III999;\r\n"
+        b"\tFri, 02 Oct 2026 14:30:05 +0000\r\n"
+    )
+
+
+def ipv6_hop_eml() -> bytes:
+    """Bracketed IPv6 literals in from/by clauses."""
+    return _with_headers(
+        b"Received: from mail.example.net (mail.example.net [IPv6:2001:db8::10])\r\n"
+        b"\tby mx.example.com ([IPv6:2001:db8::1]) with ESMTPS id JJJ000;\r\n"
+        b"\tFri, 02 Oct 2026 14:31:00 +0000\r\n"
+    )
+
+
+def minimal_headers_eml() -> bytes:
+    """No Received headers at all."""
+    return _with_headers(b"")
+
+
+def malformed_received_eml() -> bytes:
+    """Garbage Received lines: must not crash, warnings recorded."""
+    return _with_headers(
+        b"Received: this is not a received header at all\r\n"
+        b"Received:\r\n"
+        b"Received: from [not-an-ip!!!] by; some; junk;\r\n"
+    )
+
+
+def x_originating_ip_eml() -> bytes:
+    """Webmail-style originating IP headers."""
+    return _with_headers(
+        b"Received: from webmail.example.net (webmail.example.net [192.0.2.10])\r\n"
+        b"\tby mx.example.com with ESMTPS id KKK111;\r\n"
+        b"\tFri, 02 Oct 2026 14:31:00 +0000\r\n"
+        b"X-Originating-IP: [203.0.113.200]\r\n"
+        b"X-Mailer: WebMail 3.0\r\n"
+        b"User-Agent: WebMail/3.0\r\n"
+    )
+
+
+# ---------------------------------------------------------------------------
+# v0.3 authentication fixtures (hand-crafted byte strings)
+# ---------------------------------------------------------------------------
+
+_AUTH_AR_ALL_PASS = (
+    b"Authentication-Results: mx.northwind.example;\r\n"
+    b"\tspf=pass (sender IP is 203.0.113.45) "
+    b"smtp.mailfrom=bounce-9917@acme-invoices.net;\r\n"
+    b"\tdkim=pass (signature was verified) "
+    b"header.i=@acme-invoices.net header.s=sel2026;\r\n"
+    b"\tdmarc=pass (p=reject) header.from=acme-invoices.net\r\n"
+)
+
+_AUTH_DKIM_SIG = (
+    b"DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/simple; d=acme-invoices.net;\r\n"
+    b"\ts=sel2026; t=1727874600;\r\n"
+    b"\tbh=47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=;\r\n"
+    b"\th=From:To:Subject:Date:Message-ID;\r\n"
+    b"\tb=ZnJpZW5kc2lnbmF0dXJlY2xhaW1ub3R2ZXJpZmllZA==\r\n"
+)
+
+_AUTH_RSPF_PASS = (
+    b"Received-SPF: pass (mx.northwind.example: domain of "
+    b"bounce-9917@acme-invoices.net designates 203.0.113.45 as permitted "
+    b"sender) client-ip=203.0.113.45;\r\n"
+)
+
+
+def auth_all_pass_eml() -> bytes:
+    """SPF+DKIM+DMARC all pass; DKIM-Signature present; aligned."""
+    return _with_headers(_AUTH_AR_ALL_PASS + _AUTH_DKIM_SIG + _AUTH_RSPF_PASS)
+
+
+def auth_spf_fail_eml() -> bytes:
+    """SPF hard-fails; DKIM absent; DMARC fails."""
+    return _with_headers(
+        b"Authentication-Results: mx.northwind.example;\r\n"
+        b"\tspf=fail (sender IP is 198.51.100.77) "
+        b"smtp.mailfrom=bounce-9917@acme-invoices.net;\r\n"
+        b"\tdkim=none (no signature) header.d=none;\r\n"
+        b"\tdmarc=fail (p=reject) header.from=acme-invoices.net\r\n"
+        b"Received-SPF: fail (mx.northwind.example: 198.51.100.77 is not "
+        b"a permitted sender) client-ip=198.51.100.77;\r\n"
+    )
+
+
+def auth_dkim_none_eml() -> bytes:
+    """SPF passes but no DKIM signature at all (the BEC-lure shape)."""
+    return _with_headers(
+        b"Authentication-Results: mx.northwind.example;\r\n"
+        b"\tspf=pass (sender IP is 203.0.113.45) "
+        b"smtp.mailfrom=bounce-9917@acme-invoices.net;\r\n"
+        b"\tdkim=none (no signature) header.d=none;\r\n"
+        b"\tdmarc=none (no policy) header.from=acme-invoices.net\r\n"
+        b"Received-SPF: pass (mx.northwind.example: domain of "
+        b"bounce-9917@acme-invoices.net designates 203.0.113.45 as permitted "
+        b"sender) client-ip=203.0.113.45;\r\n"
+    )
+
+
+def auth_conflicting_eml() -> bytes:
+    """Two Authentication-Results headers disagree on SPF."""
+    return _with_headers(
+        b"Authentication-Results: mx.northwind.example;\r\n"
+        b"\tspf=pass (sender IP is 203.0.113.45) "
+        b"smtp.mailfrom=bounce-9917@acme-invoices.net\r\n"
+        b"Authentication-Results: gateway.example.org;\r\n"
+        b"\tspf=fail (forged sender) smtp.mailfrom=bounce-9917@acme-invoices.net\r\n"
+    )
+
+
+def auth_misaligned_eml() -> bytes:
+    """SPF passes for a different domain than From (unaligned)."""
+    return _with_headers(
+        b"Authentication-Results: mx.northwind.example;\r\n"
+        b"\tspf=pass (sender IP is 198.51.100.99) "
+        b"smtp.mailfrom=bounce@evil-relay.example;\r\n"
+        b"\tdkim=none header.d=none;\r\n"
+        b"\tdmarc=fail header.from=acme-invoices.net\r\n"
+    )
+
+
+def auth_malformed_eml() -> bytes:
+    """Garbage auth headers: must not crash, warnings recorded."""
+    return _with_headers(
+        b"Authentication-Results: just some words no semicolons\r\n"
+        b"Authentication-Results: mx.example.com; spf; dkim==weird\r\n"
+        b"DKIM-Signature: not-a-tag-list\r\n"
+        b"DKIM-Signature: \r\n"
+        b"Received-SPF: \r\n"
+        b"Received-SPF: (no result token here)\r\n"
+    )

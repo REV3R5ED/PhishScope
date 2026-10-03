@@ -23,6 +23,7 @@ from conftest import (
     write_eml,
 )
 
+import phishscope
 from phishscope.core.config import default_config
 from phishscope.parsers.safe_eml import (
     HeaderTooLarge,
@@ -58,7 +59,7 @@ def test_simple_message_fields(cfg):
     assert msg.attachments == []
     assert msg.mime_tree.content_type == "text/plain"
     assert msg.provenance.parser_name == "phishscope.safe_eml"
-    assert msg.provenance.phishscope_version == "0.1.0"
+    assert msg.provenance.phishscope_version == phishscope.__version__
 
 
 def test_multipart_structure_and_attachments(cfg):
