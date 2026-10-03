@@ -8,10 +8,8 @@ when the example or rendering changes.
 
 from __future__ import annotations
 
-import io
 import subprocess
 import sys
-from contextlib import redirect_stdout
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
@@ -54,11 +52,18 @@ def main() -> None:
     text = (proc.stdout or "").strip().splitlines()
     # Drop the trailing observations block to keep the shot focused.
     cut = next(
-        (i for i, line in enumerate(text) if line.startswith("Attachment observations")),
+        (
+            i
+            for i, line in enumerate(text)
+            if line.startswith("Attachment observations")
+        ),
         len(text),
     )
     text = text[:cut]
-    text.insert(0, "$ phishscope attachments docs/examples/invoice-scam-attachments.eml")
+    text.insert(
+        0,
+        "$ phishscope attachments docs/examples/invoice-scam-attachments.eml",
+    )
 
     font = _font()
     height = MARGIN * 2 + LINE_H * len(text) + 8
