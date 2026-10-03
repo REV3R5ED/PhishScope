@@ -26,6 +26,19 @@ class AppConfig:
     max_mime_depth: int = 16
     """Reject multipart nesting deeper than this (recursion guard)."""
 
+    max_archive_depth: int = 3
+    """Nested archives deeper than this are noted, not opened (v0.5)."""
+
+    max_archive_entries: int = 500
+    """Cap on inventoried archive members; excess becomes a warning (v0.5)."""
+
+    max_nested_member_bytes: int = 10 * 1024 * 1024
+    """Nested archive members larger than this are not opened (v0.5)."""
+
+    max_attachment_warn_bytes: int = 10 * 1024 * 1024
+    """Attachments at/above this size get an oversized-attachment
+    observation (analyst awareness; content is still fully processed)."""
+
     display_truncate_len: int = 200
     """Header values longer than this are truncated in human output
     (full values are always present in --json)."""

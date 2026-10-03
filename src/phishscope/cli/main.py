@@ -1,4 +1,4 @@
-"""PhishScope CLI: analyze / overview / hops / auth / urls.
+"""PhishScope CLI: analyze / overview / hops / auth / urls / attachments.
 
 Every command renders human-readable text by default (``--json`` for
 automation), uses structured exit codes (0 ok / 1 parser warnings /
@@ -27,6 +27,8 @@ from collections.abc import Sequence
 from typing import Any
 
 from phishscope import __version__
+from phishscope.attachments.analysis import analyze_attachments
+from phishscope.attachments.models import AttachmentAnalysis
 from phishscope.auth.analysis import analyze_auth
 from phishscope.auth.models import AuthAnalysis
 from phishscope.core import config as config_mod
@@ -574,6 +576,7 @@ def cmd_analyze(args: argparse.Namespace, cfg: AppConfig) -> int:
     headers: HeaderAnalysis | None = None
     auth: AuthAnalysis | None = None
     urls: UrlAnalysis | None = None
+    attachments: AttachmentAnalysis | None = None
     if args.headers and result.status != "error":
         # Raw bytes are already in hand; header + auth analysis
         # re-derive from them (never from the normalized model) and
@@ -589,6 +592,12 @@ def cmd_analyze(args: argparse.Namespace, cfg: AppConfig) -> int:
         urls = analyze_urls(raw, args.file, cfg)
         if result.message is not None:
             result.message["urls"] = urls.to_dict()
+    if args.attachments and result.status != "error":
+        # In-memory attachment forensics: never written to disk,
+        # never executed, never rendered.
+        attachments = analyze_attachments(raw, args.file, cfg)
+        if result.message is not None:
+            result.message["attachments_detail"] = attachments.to_dict()
     if args.json:
         print(json.dumps(result.to_dict(), indent=2, sort_keys=True))
     elif result.status == "error":
@@ -609,10 +618,14 @@ def cmd_analyze(args: argparse.Namespace, cfg: AppConfig) -> int:
             if urls is not None:
                 print()
                 print(render_urls_section(urls, cfg))
+            if attachments is not None:
+                print()
+                print(render_attachments_section(attachments, cfg))
     extra = (
         (len(headers.parser_warnings) if headers else 0)
         + (len(auth.parser_warnings) if auth else 0)
         + (len(urls.parser_warnings) if urls else 0)
+        + (len(attachments.parser_warnings) if attachments else 0)
     )
     code = _exit_for(result, extra)
     audit_log({"command": ["analyze", args.file], "exit": code})
@@ -691,6 +704,131 @@ def cmd_urls(args: argparse.Namespace, cfg: AppConfig) -> int:
     return code
 
 
+def _render_attachment_observations(d: dict[str, Any], cfg: AppConfig) -> str:
+    observations = d["observations"]
+    if not observations:
+        return "Attachment observations — facts, not verdicts:\n  (none)"
+    lines = ["Attachment observations — facts, not verdicts:"]
+    for obs in observations:
+        detail = truncate(obs["detail"], cfg.display_truncate_len)
+        lines.append(f"  [•] {obs['code']}: {detail}")
+    return "\n".join(lines)
+
+
+def _render_archive(inv: dict[str, Any], indent: str) -> list[str]:
+    header = f"{indent}archive: {inv['format']} ({inv['member_count']} member(s)"
+    if inv["truncated"]:
+        header += ", truncated"
+    if inv["encrypted_entries"]:
+        header += f", {inv['encrypted_entries']} encrypted"
+    header += ")"
+    lines = [header]
+    for member in inv["members"]:
+        enc = " [encrypted]" if member["encrypted"] else ""
+        lines.append(f"{indent}  - {member['name']}{enc}")
+    for nested in inv["nested_inventories"]:
+        lines.append(f"{indent}  [nested]")
+        lines.extend(_render_archive(nested, indent + "    "))
+    return lines
+
+
+def render_attachments_human(
+    analysis: AttachmentAnalysis, cfg: AppConfig, full_hash: bool = False
+) -> str:
+    """Focused attachment inventory: in-memory analysis, never on disk."""
+    d = analysis.to_dict()
+    lines = [
+        f"PhishScope v{__version__} — attachment inventory (in-memory only)",
+        "",
+        f"Evidence ID : {d['evidence_id']}",
+        f"Source      : {d['source_path']}",
+        f"Attachments : {len(d['attachments'])}",
+        "",
+        "SAFETY BOUNDARY: attachment bytes are analyzed in memory only —",
+        "never written to disk, never executed, never rendered. Archive",
+        "members are listed by name only; encrypted entries are never read.",
+        "",
+    ]
+    if not d["attachments"]:
+        lines.append("No attachments observed in this message.")
+    for a in d["attachments"]:
+        ident = a["identified"]
+        lines.append(f"[attachment] {_disp(a['filename'], cfg)}")
+        lines.append(f"  part   : {a['part_index']}")
+        lines.append(f"  claimed: {a['mime_claim']}")
+        lines.append(f"  magic  : {ident['label']} ({ident['detail']})")
+        lines.append(f"  size   : {a['size_bytes']:,} bytes")
+        if full_hash:
+            lines.append(f"  sha256 : {a['sha256']}")
+            lines.append(f"  md5    : {a['md5']}")
+        else:
+            lines.append(f"  sha256 : {a['sha256'][:16]}…  (--hash for full)")
+        if a["archive"] is not None:
+            lines.extend(_render_archive(a["archive"], "  "))
+        if a["ole"] is not None and (a["ole"]["storages"] or a["ole"]["streams"]):
+            lines.append(
+                f"  ole    : {len(a['ole']['storages'])} storage(s), "
+                f"{len(a['ole']['streams'])} stream(s)"
+            )
+        if a["observation_codes"]:
+            lines.append(f"  flags  : {', '.join(a['observation_codes'])}")
+        lines.append("")
+    lines.append(_render_attachment_observations(d, cfg))
+    att_warnings = d["parser_warnings"]
+    if att_warnings:
+        lines.append("")
+        lines.append(f"Attachment parser warnings ({len(att_warnings)}):")
+        for warn in att_warnings:
+            lines.append(
+                f"  [!] {warn['code']}: "
+                f"{truncate(warn['detail'], cfg.display_truncate_len)}"
+            )
+    return "\n".join(lines)
+
+
+def render_attachments_section(analysis: AttachmentAnalysis, cfg: AppConfig) -> str:
+    """Attachment section appended to ``analyze --attachments`` output."""
+    d = analysis.to_dict()
+    lines = [f"Attachments ({len(d['attachments'])}, in-memory only):"]
+    if not d["attachments"]:
+        lines.append("  (none observed)")
+    for a in d["attachments"]:
+        line = f"  {_disp(a['filename'], cfg)}"
+        extras = [a["identified"]["label"], f"{a['size_bytes']:,} bytes"]
+        if a["observation_codes"]:
+            extras.append(", ".join(a["observation_codes"]))
+        line += f"  [{'; '.join(extras)}]"
+        lines.append(line)
+    lines.append("")
+    lines.append("  " + _render_attachment_observations(d, cfg).replace("\n", "\n  "))
+    return "\n".join(lines)
+
+
+def cmd_attachments(args: argparse.Namespace, cfg: AppConfig) -> int:
+    result, _message, raw = _analyze(args.file, cfg)
+    result.command = "attachments"
+    analysis: AttachmentAnalysis | None = None
+    if result.status != "error":
+        # In-memory only: bytes are hashed/identified/listed in RAM —
+        # never written to disk, never executed, never rendered.
+        try:
+            analysis = analyze_attachments(raw, args.file, cfg)
+        except ValueError as exc:
+            result.status = "error"
+            result.errors.append(str(exc))
+        else:
+            result.message = {"attachments": analysis.to_dict()}
+    if args.json:
+        print(json.dumps(result.to_dict(), indent=2, sort_keys=True))
+    elif result.status == "error":
+        print(f"phishscope: error: {'; '.join(result.errors)}", file=sys.stderr)
+    elif analysis is not None:
+        print(render_attachments_human(analysis, cfg, full_hash=args.hash))
+    code = _exit_for(result, len(analysis.parser_warnings) if analysis else 0)
+    audit_log({"command": ["attachments", args.file], "exit": code})
+    return code
+
+
 # ---------------------------------------------------------------------------
 # Argument parsing
 # ---------------------------------------------------------------------------
@@ -743,6 +881,13 @@ def build_parser() -> argparse.ArgumentParser:
         "decomposed URLs (never fetched, never resolved) with "
         "observation-only analysis",
     )
+    p_analyze.add_argument(
+        "--attachments",
+        action="store_true",
+        help="include attachment forensics: magic-byte identification, "
+        "declared-vs-identified type observations, archive inventory "
+        "by name only (in memory — never written to disk, never executed)",
+    )
     p_analyze.set_defaults(func=cmd_analyze)
 
     p_overview = sub.add_parser(
@@ -780,6 +925,22 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_urls.add_argument("file", help="path to the .eml / RFC 5322 message")
     p_urls.set_defaults(func=cmd_urls)
+
+    p_attachments = sub.add_parser(
+        "attachments",
+        parents=[common],
+        help="focused attachment inventory: magic-byte identification, "
+        "declared-vs-identified type observations, archive contents by "
+        "name only (in memory — never written to disk, never executed)",
+    )
+    p_attachments.add_argument("file", help="path to the .eml / RFC 5322 message")
+    p_attachments.add_argument(
+        "--hash",
+        action="store_true",
+        help="show full SHA-256 and MD5 hashes in human output "
+        "(hashes are always present in --json)",
+    )
+    p_attachments.set_defaults(func=cmd_attachments)
 
     return parser
 

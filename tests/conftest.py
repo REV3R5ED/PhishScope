@@ -8,6 +8,9 @@ deterministic.
 from __future__ import annotations
 
 import email.utils
+import io
+import struct
+import zipfile
 from email.message import EmailMessage
 from pathlib import Path
 
@@ -514,3 +517,186 @@ def urls_malformed_eml() -> bytes:
 def urls_none_eml() -> bytes:
     """A clean message with no URLs at all."""
     return _with_headers(b"")
+
+
+# ---------------------------------------------------------------------------
+# v0.5 attachment-forensics fixtures.
+#
+# Every binary payload is synthesized in-process — no binary fixtures are
+# committed (the GitHub integration corrupts non-UTF-8 content).
+# ---------------------------------------------------------------------------
+
+
+def pe_bytes() -> bytes:
+    """Minimal PE stub: MZ header + padding (never executed)."""
+    return b"MZ" + b"\x90" * 62 + b"PE stub for forensic tests"
+
+
+def elf_bytes() -> bytes:
+    return b"\x7fELF" + b"\x02\x01\x01" + b"\x00" * 60
+
+
+def pdf_bytes() -> bytes:
+    return b"%PDF-1.4\n%\xe2\xe3\xcf\xd3\nfake pdf body for tests\n"
+
+
+def script_bytes() -> bytes:
+    return b"#!/bin/bash\necho hello\n"
+
+
+def _ole_dir_entry(
+    name: str, obj_type: int, left: int, right: int, child: int
+) -> bytes:
+    name_u16 = name.encode("utf-16-le")
+    entry = bytearray(128)
+    entry[0 : len(name_u16)] = name_u16
+    struct.pack_into("<H", entry, 64, len(name_u16) + 2)
+    entry[66] = obj_type
+    entry[67] = 1  # black
+    struct.pack_into("<i", entry, 68, left)
+    struct.pack_into("<i", entry, 72, right)
+    struct.pack_into("<i", entry, 76, child)
+    struct.pack_into("<i", entry, 116, -2)  # end of chain
+    struct.pack_into("<I", entry, 120, 0)
+    return bytes(entry)
+
+
+def ole_bytes(with_vba: bool = True) -> bytes:
+    """Synthesize a minimal valid OLE compound file in memory.
+
+    Header sector + one FAT sector + one directory sector. When
+    ``with_vba`` the directory contains a VBA storage with a
+    _VBA_PROJECT_CUR stream; otherwise a benign Data storage.
+    """
+    header = bytearray(512)
+    header[0:8] = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
+    struct.pack_into("<H", header, 24, 0x003E)
+    struct.pack_into("<H", header, 26, 3)
+    struct.pack_into("<H", header, 28, 0xFFFE)
+    struct.pack_into("<H", header, 30, 9)  # 512-byte sectors
+    struct.pack_into("<H", header, 32, 6)
+    struct.pack_into("<I", header, 44, 1)  # one FAT sector
+    struct.pack_into("<I", header, 48, 1)  # directory starts at sector 1
+    struct.pack_into("<I", header, 56, 0x1000)
+    struct.pack_into("<I", header, 60, 0xFFFFFFFE)
+    struct.pack_into("<I", header, 68, 0xFFFFFFFE)
+    struct.pack_into("<I", header, 76, 0)  # DIFAT[0] -> sector 0
+    for i in range(1, 109):
+        struct.pack_into("<I", header, 76 + i * 4, 0xFFFFFFFF)
+
+    fat = bytearray(512)
+    struct.pack_into("<I", fat, 0, 0xFFFFFFFD)  # sector 0 is the FAT
+    struct.pack_into("<I", fat, 4, 0xFFFFFFFE)  # sector 1: end of chain
+    for i in range(2, 128):
+        struct.pack_into("<I", fat, i * 4, 0xFFFFFFFF)
+
+    storage_name = "VBA" if with_vba else "Data"
+    stream_name = "_VBA_PROJECT_CUR" if with_vba else "contents"
+    directory = (
+        _ole_dir_entry("Root Entry", 5, -1, -1, 1)
+        + _ole_dir_entry(storage_name, 1, -1, -1, 2)
+        + _ole_dir_entry(stream_name, 2, -1, -1, -1)
+        + _ole_dir_entry("padding", 0, -1, -1, -1)
+    )
+    return bytes(header) + bytes(fat) + directory
+
+
+def encrypted_zip_bytes() -> bytes:
+    """Hand-crafted ZIP with the encryption flag set on its only entry.
+
+    The entry data is dummy bytes — readers must detect the flag and
+    never attempt to read the content (no password attempts).
+    """
+    filename = b"secret.txt"
+    data = b"X" * 16
+    local = (
+        b"PK\x03\x04"
+        + struct.pack("<H", 20)
+        + struct.pack("<H", 0x0001)  # encrypted flag
+        + struct.pack("<H", 0)  # stored
+        + struct.pack("<H", 0)
+        + struct.pack("<H", 0)
+        + struct.pack("<I", 0)
+        + struct.pack("<I", len(data))
+        + struct.pack("<I", len(data))
+        + struct.pack("<H", len(filename))
+        + struct.pack("<H", 0)
+        + filename
+        + data
+    )
+    central = (
+        b"PK\x01\x02"
+        + struct.pack("<H", 20)
+        + struct.pack("<H", 20)
+        + struct.pack("<H", 0x0001)  # encrypted flag
+        + struct.pack("<H", 0)
+        + struct.pack("<H", 0)
+        + struct.pack("<H", 0)
+        + struct.pack("<I", 0)
+        + struct.pack("<I", len(data))
+        + struct.pack("<I", len(data))
+        + struct.pack("<H", len(filename))
+        + struct.pack("<H", 0)
+        + struct.pack("<H", 0)
+        + struct.pack("<H", 0)
+        + struct.pack("<H", 0)
+        + struct.pack("<I", 0)
+        + struct.pack("<I", 0)  # local header offset
+        + filename
+    )
+    cd_offset = len(local)
+    eocd = (
+        b"PK\x05\x06"
+        + struct.pack("<H", 0)
+        + struct.pack("<H", 0)
+        + struct.pack("<H", 1)
+        + struct.pack("<H", 1)
+        + struct.pack("<I", len(central))
+        + struct.pack("<I", cd_offset)
+        + struct.pack("<H", 0)
+    )
+    return local + central + eocd
+
+
+def zip_bytes(members: dict) -> bytes:
+    """Build a ZIP in memory from {name: bytes}."""
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for name, data in members.items():
+            zf.writestr(name, data)
+    return buf.getvalue()
+
+
+def nested_zip_bytes(depth: int = 2) -> bytes:
+    """ZIP containing a ZIP ... ``depth`` levels deep (innermost: payload.txt)."""
+    inner: bytes = zip_bytes({"payload.txt": b"innermost payload"})
+    for _ in range(depth - 1):
+        inner = zip_bytes({"inner.zip": inner, "readme.txt": b"level"})
+    return inner
+
+
+def eml_with_attachments(specs: list) -> bytes:
+    """Build a message; ``specs`` is [(filename, mime, payload_bytes)].
+
+    ``mime`` like "application/octet-stream" or "text/plain".
+    """
+    msg = EmailMessage()
+    msg["From"] = "Acme Billing <billing@acme-invoices.net>"
+    msg["To"] = "victim@northwind.example"
+    msg["Subject"] = "Past-due invoice — see attached"
+    msg["Date"] = "Fri, 02 Oct 2026 14:30:00 +0000"
+    msg["Message-ID"] = "<att-001@acme-invoices.net>"
+    msg.set_content("Please see the attached documents.\n")
+    msg.make_mixed()
+    for filename, mime, payload in specs:
+        maintype, subtype = mime.split("/", 1)
+        part = EmailMessage()
+        part.set_content(
+            payload,
+            maintype=maintype,
+            subtype=subtype,
+            disposition="attachment",
+            filename=filename,
+        )
+        msg.attach(part)
+    return msg.as_bytes()
