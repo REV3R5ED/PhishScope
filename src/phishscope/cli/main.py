@@ -1,4 +1,4 @@
-"""PhishScope CLI: ``phishscope analyze <message.eml>`` / ``overview <message.eml>``.
+"""PhishScope CLI: analyze / overview / hops / auth.
 
 Every command renders human-readable text by default (``--json`` for
 automation), uses structured exit codes (0 ok / 1 parser warnings /
@@ -8,7 +8,11 @@ stdout carries only the requested output.
 Forensic posture: the source file is only ever opened read-only, the
 SHA-256 is computed before any parsing, and URLs in human output are
 defanged so they cannot be followed by accident. ``--show-raw`` prints
-the original bytes behind an explicit safety banner.
+the original bytes behind an explicit safety banner. Header forensics
+never resolves hostnames and never fetches anything — observations
+describe what the headers claim, not what is true. Authentication
+analysis is fully offline: no DNS lookups, no DKIM key retrieval, no
+signature verification; results record header claims only.
 """
 
 from __future__ import annotations
@@ -21,11 +25,15 @@ from collections.abc import Sequence
 from typing import Any
 
 from phishscope import __version__
+from phishscope.auth.analysis import analyze_auth
+from phishscope.auth.models import AuthAnalysis
 from phishscope.core import config as config_mod
 from phishscope.core.config import AppConfig
 from phishscope.core.logging import audit_log, configure_logging, get_logger
 from phishscope.core.models import NormalizedMessage
 from phishscope.core.results import EXIT_ERROR, EXIT_FINDINGS, EXIT_OK, Result
+from phishscope.headers.analysis import analyze_headers
+from phishscope.headers.models import HeaderAnalysis
 from phishscope.parsers import safe_eml
 from phishscope.parsers.safe_eml import ParseError
 
@@ -182,6 +190,206 @@ def _render_warnings(msg: NormalizedMessage) -> str:
     return "\n".join(lines)
 
 
+def _hop_endpoint(host: str | None, ip: str | None) -> str:
+    """Human display of a from/by endpoint: host, ip, or both."""
+    if host and ip:
+        return f"{host} [{ip}]"
+    if ip:
+        return f"[{ip}]"
+    return host or "—"
+
+
+def _hop_timestamp(hop: dict[str, Any]) -> str:
+    if hop["timestamp_valid"] and hop["timestamp_utc"]:
+        return str(hop["timestamp_utc"])
+    if hop["timestamp_original"]:
+        return f"<unparseable: {hop['timestamp_original']}>"
+    return "<missing>"
+
+
+def render_hops_human(analysis: HeaderAnalysis, cfg: AppConfig) -> str:
+    """Focused Received-chain view, oldest hop first."""
+    d = analysis.to_dict()
+    lines = [
+        f"PhishScope v{__version__} — Received chain (oldest → newest)",
+        "",
+        f"Evidence ID : {d['evidence_id']}",
+        f"Source      : {d['source_path']}",
+        f"Hops        : {len(d['received'])}",
+        "",
+    ]
+    if not d["received"]:
+        lines.append("No Received headers present; routing path is unobserved.")
+    for hop in d["received"]:
+        lines.append(f"[hop {hop['position']}] {_hop_timestamp(hop)}")
+        from_ep = _disp(
+            _hop_endpoint(hop["from_host"], hop["from_ip"]), cfg, defang=False
+        )
+        by_ep = _disp(_hop_endpoint(hop["by_host"], hop["by_ip"]), cfg, defang=False)
+        lines.append(f"  from : {from_ep}")
+        lines.append(f"  by   : {by_ep}")
+        extra = []
+        if hop["with_protocol"]:
+            extra.append(f"with {hop['with_protocol']}")
+        if hop["hop_id"]:
+            extra.append(f"id {hop['hop_id']}")
+        if extra:
+            lines.append(f"         {', '.join(extra)}")
+    lines.append("")
+    lines.append(_render_observations(d, cfg))
+    header_warnings = d["parser_warnings"]
+    if header_warnings:
+        lines.append("")
+        lines.append(f"Header parser warnings ({len(header_warnings)}):")
+        for warn in header_warnings:
+            lines.append(
+                f"  [!] {warn['code']}: "
+                f"{truncate(warn['detail'], cfg.display_truncate_len)}"
+            )
+    return "\n".join(lines)
+
+
+def _render_observations(d: dict[str, Any], cfg: AppConfig) -> str:
+    observations = d["observations"]
+    if not observations:
+        return "Observations: none"
+    lines = [f"Observations ({len(observations)}) — facts, not verdicts:"]
+    for obs in observations:
+        lines.append(
+            f"  [•] {obs['code']}: {truncate(obs['detail'], cfg.display_truncate_len)}"
+        )
+    return "\n".join(lines)
+
+
+def render_headers_section(analysis: HeaderAnalysis, cfg: AppConfig) -> str:
+    """Routing-headers section appended to ``analyze --headers`` output."""
+    d = analysis.to_dict()
+    lines = ["Routing headers:"]
+    lines.append(f"  Return-Path : {_disp(_addr_display(d['return_path']), cfg)}")
+    lines.append(f"  Message-ID  : {_disp(d['message_id'], cfg, defang=False)}")
+    if d["x_originating_ip"]:
+        lines.append(f"  X-Originating-IP : {d['x_originating_ip']}")
+    if d["x_sender_ip"]:
+        lines.append(f"  X-Sender-IP      : {d['x_sender_ip']}")
+    if d["x_mailer"]:
+        lines.append(f"  X-Mailer      : {_disp(d['x_mailer'], cfg, defang=False)}")
+    if d["user_agent"]:
+        lines.append(f"  User-Agent    : {_disp(d['user_agent'], cfg, defang=False)}")
+    for name, value in d["list_headers"].items():
+        lines.append(f"  {name:<14}: {_disp(value, cfg, defang=False)}")
+    lines.append("")
+    lines.append(f"  Received chain ({len(d['received'])} hops, oldest → newest):")
+    if not d["received"]:
+        lines.append("    (none)")
+    for hop in d["received"]:
+        lines.append(
+            f"    [{hop['position']}] {_hop_timestamp(hop)}  "
+            f"{_hop_endpoint(hop['from_host'], hop['from_ip'])} → "
+            f"{_hop_endpoint(hop['by_host'], hop['by_ip'])}"
+        )
+    lines.append("")
+    lines.append("  " + _render_observations(d, cfg).replace("\n", "\n  "))
+    return "\n".join(lines)
+
+
+def _auth_result_domain(props: dict[str, Any]) -> str | None:
+    """Best-effort domain for a rendered auth result (display only)."""
+    for key in (
+        "header.i",
+        "header.d",
+        "header.from",
+        "smtp.mailfrom",
+        "envelope-from",
+    ):
+        value = props.get(key)
+        if not value:
+            continue
+        domain = str(value).strip().lower().lstrip("@")
+        if "@" in domain:
+            domain = domain.rsplit("@", 1)[1]
+        domain = domain.strip().rstrip(".")
+        if domain and domain != "none":
+            return domain
+    return None
+
+
+def render_auth_human(analysis: AuthAnalysis, cfg: AppConfig) -> str:
+    """Focused authentication view: claims, alignment, never verdicts."""
+    d = analysis.to_dict()
+    lines = [
+        f"PhishScope v{__version__} — authentication (header claims only)",
+        "",
+        f"Evidence ID : {d['evidence_id']}",
+        f"Source      : {d['source_path']}",
+        f"From domain : {d['from_domain'] or '<unknown>'}",
+        "",
+        "OFFLINE BOUNDARY: no DNS lookups, no DKIM key retrieval, no",
+        "signature verification. Results below are what the headers claim.",
+        "",
+    ]
+    if d["auth_results"]:
+        lines.append("Authentication-Results:")
+        for r in d["auth_results"]:
+            domain = _auth_result_domain(r["properties"])
+            line = f"  {r['method']}={r['result']}  (by {r['authserv_id']})"
+            if domain:
+                line += f"  domain={_disp(domain, cfg, defang=False)}"
+            if r["reason"]:
+                line += f"  — {_disp(r['reason'], cfg, defang=False)}"
+            lines.append(line)
+        lines.append("")
+    if d["dkim_signatures"]:
+        lines.append("DKIM-Signature claims (NOT cryptographically verified):")
+        for s in d["dkim_signatures"]:
+            lines.append(
+                f"  d={s['d'] or '<missing>'} s={s['s'] or '<missing>'} "
+                f"a={s['a'] or '<missing>'} c={s['c'] or '<missing>'} "
+                f"bh={truncate(s['bh'] or '<missing>', 24)}"
+            )
+        lines.append("")
+    if d["received_spf"]:
+        lines.append("Received-SPF:")
+        for s in d["received_spf"]:
+            line = f"  {s['result']}"
+            if s["detail"]:
+                line += f" — {_disp(s['detail'], cfg, defang=False)}"
+            lines.append(line)
+        lines.append("")
+    lines.append(
+        _render_observations({"observations": d["observations"]}, cfg).replace(
+            "Observations", "Auth observations"
+        )
+    )
+    auth_warnings = d["parser_warnings"]
+    if auth_warnings:
+        lines.append("")
+        lines.append(f"Auth parser warnings ({len(auth_warnings)}):")
+        for warn in auth_warnings:
+            lines.append(
+                f"  [!] {warn['code']}: "
+                f"{truncate(warn['detail'], cfg.display_truncate_len)}"
+            )
+    return "\n".join(lines)
+
+
+def render_auth_section(analysis: AuthAnalysis, cfg: AppConfig) -> str:
+    """Authentication section appended to ``analyze --headers`` output."""
+    d = analysis.to_dict()
+    lines = ["Authentication (header claims only — offline, never verified):"]
+    for r in d["auth_results"]:
+        lines.append(f"  {r['method']}={r['result']}  (by {r['authserv_id']})")
+    if not d["auth_results"] and not d["dkim_signatures"] and not d["received_spf"]:
+        lines.append("  (no authentication headers present)")
+    lines.append("")
+    lines.append(
+        "  "
+        + _render_observations({"observations": d["observations"]}, cfg).replace(
+            "\n", "\n  "
+        )
+    )
+    return "\n".join(lines)
+
+
 def render_overview_human(msg: NormalizedMessage, cfg: AppConfig) -> str:
     """Compact one-screen summary (defanged)."""
     lim = cfg.display_truncate_len
@@ -232,8 +440,31 @@ def _analyze(
     return result, message, raw
 
 
+def _exit_for(result: Result, extra_warnings: int = 0) -> int:
+    """Exit code from a result: 2 error, 1 any warnings, else 0."""
+    if result.status == "error":
+        return EXIT_ERROR
+    base_warnings = 0
+    if result.message:
+        base_warnings = len(result.message.get("parser_warnings", []))
+    if base_warnings + extra_warnings:
+        return EXIT_FINDINGS
+    return EXIT_OK
+
+
 def cmd_analyze(args: argparse.Namespace, cfg: AppConfig) -> int:
     result, message, raw = _analyze(args.file, cfg)
+    headers: HeaderAnalysis | None = None
+    auth: AuthAnalysis | None = None
+    if args.headers and result.status != "error":
+        # Raw bytes are already in hand; header + auth analysis
+        # re-derive from them (never from the normalized model) and
+        # never touch the network.
+        headers = analyze_headers(raw, args.file, cfg)
+        auth = analyze_auth(raw, args.file, cfg)
+        if result.message is not None:
+            result.message["headers"] = headers.to_dict()
+            result.message["authentication"] = auth.to_dict()
     if args.json:
         print(json.dumps(result.to_dict(), indent=2, sort_keys=True))
     elif result.status == "error":
@@ -245,13 +476,16 @@ def cmd_analyze(args: argparse.Namespace, cfg: AppConfig) -> int:
             print(raw.decode("utf-8", errors="replace"))
         else:
             print(render_analyze_human(message, cfg))
-    code = (
-        EXIT_ERROR
-        if result.status == "error"
-        else EXIT_FINDINGS
-        if result.message and result.message["parser_warnings"]
-        else EXIT_OK
+            if headers is not None:
+                print()
+                print(render_headers_section(headers, cfg))
+            if auth is not None:
+                print()
+                print(render_auth_section(auth, cfg))
+    extra = (len(headers.parser_warnings) if headers else 0) + (
+        len(auth.parser_warnings) if auth else 0
     )
+    code = _exit_for(result, extra)
     audit_log({"command": ["analyze", args.file], "exit": code})
     return code
 
@@ -265,14 +499,46 @@ def cmd_overview(args: argparse.Namespace, cfg: AppConfig) -> int:
         print(f"phishscope: error: {'; '.join(result.errors)}", file=sys.stderr)
     elif message is not None:
         print(render_overview_human(message, cfg))
-    code = (
-        EXIT_ERROR
-        if result.status == "error"
-        else EXIT_FINDINGS
-        if result.message and result.message["parser_warnings"]
-        else EXIT_OK
-    )
+    code = _exit_for(result)
     audit_log({"command": ["overview", args.file], "exit": code})
+    return code
+
+
+def cmd_hops(args: argparse.Namespace, cfg: AppConfig) -> int:
+    result, _message, raw = _analyze(args.file, cfg)
+    result.command = "hops"
+    analysis: HeaderAnalysis | None = None
+    if result.status != "error":
+        analysis = analyze_headers(raw, args.file, cfg)
+        result.message = {"headers": analysis.to_dict()}
+    if args.json:
+        print(json.dumps(result.to_dict(), indent=2, sort_keys=True))
+    elif result.status == "error":
+        print(f"phishscope: error: {'; '.join(result.errors)}", file=sys.stderr)
+    elif analysis is not None:
+        print(render_hops_human(analysis, cfg))
+    code = _exit_for(result, len(analysis.parser_warnings) if analysis else 0)
+    audit_log({"command": ["hops", args.file], "exit": code})
+    return code
+
+
+def cmd_auth(args: argparse.Namespace, cfg: AppConfig) -> int:
+    result, _message, raw = _analyze(args.file, cfg)
+    result.command = "auth"
+    analysis: AuthAnalysis | None = None
+    if result.status != "error":
+        # Offline: parses header claims only — no DNS, no key retrieval,
+        # no signature verification.
+        analysis = analyze_auth(raw, args.file, cfg)
+        result.message = {"authentication": analysis.to_dict()}
+    if args.json:
+        print(json.dumps(result.to_dict(), indent=2, sort_keys=True))
+    elif result.status == "error":
+        print(f"phishscope: error: {'; '.join(result.errors)}", file=sys.stderr)
+    elif analysis is not None:
+        print(render_auth_human(analysis, cfg))
+    code = _exit_for(result, len(analysis.parser_warnings) if analysis else 0)
+    audit_log({"command": ["auth", args.file], "exit": code})
     return code
 
 
@@ -315,6 +581,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="print the original message bytes behind a safety banner "
         "(human output only; raw bytes never appear in --json)",
     )
+    p_analyze.add_argument(
+        "--headers",
+        action="store_true",
+        help="include header forensics: normalized routing headers and the "
+        "Received chain (oldest-to-newest) with observation-only analysis",
+    )
     p_analyze.set_defaults(func=cmd_analyze)
 
     p_overview = sub.add_parser(
@@ -324,6 +596,24 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_overview.add_argument("file", help="path to the .eml / RFC 5322 message")
     p_overview.set_defaults(func=cmd_overview)
+
+    p_hops = sub.add_parser(
+        "hops",
+        parents=[common],
+        help="focused Received-chain view: each hop oldest-to-newest with "
+        "observation-only chain forensics (never resolves hostnames)",
+    )
+    p_hops.add_argument("file", help="path to the .eml / RFC 5322 message")
+    p_hops.set_defaults(func=cmd_hops)
+
+    p_auth = sub.add_parser(
+        "auth",
+        parents=[common],
+        help="focused SPF/DKIM/DMARC view: what the authentication headers "
+        "claim, alignment observations, offline (no DNS, no verification)",
+    )
+    p_auth.add_argument("file", help="path to the .eml / RFC 5322 message")
+    p_auth.set_defaults(func=cmd_auth)
 
     return parser
 

@@ -88,3 +88,15 @@ register(
         commands=["analyze", "overview"],
     )
 )
+
+# v0.2 built-in modules.
+register(
+    ModuleInfo(
+        name="headers",
+        description="Header forensics: Received-chain parsing (oldest-to-newest), "
+        "routing/auth-relevant header normalization, observation-only chain "
+        "forensics (v0.2)",
+        version="0.2.0",
+        commands=["hops"],
+    )
+)
