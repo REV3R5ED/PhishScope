@@ -250,3 +250,68 @@ defanged; `--json` carries exact values for tooling.
   handled); the exact host is always reported alongside.
 - Only `http`/`https` URLs are extracted; bare domains without a
   scheme are not treated as URLs.
+
+## Scenario: triage the lure's attachments (v0.5)
+
+The invoice lure is back with four attachments
+(`docs/examples/invoice-scam-attachments.eml`). v0.5 inventories each
+one **in memory only** — never written to disk, never executed, never
+rendered:
+
+```bash
+phishscope attachments docs/examples/invoice-scam-attachments.eml
+```
+
+![phishscope attachments: attachment forensics on the invoice lure](images/05-attachments.png)
+
+Read the inventory as observations, not verdicts:
+
+- **`double-extension` + `executable-content`** —
+  `Invoice_INV-4821.pdf.exe` has two extensions ending in `.exe` and
+  its first bytes are an `MZ` header (PE executable). The `.pdf` is
+  camouflage. The file was hashed and identified; it was not run.
+- **`macro-capable-format` + `vba-project-present`** —
+  `Payment_Instructions.docm` is a ZIP (OOXML) whose member list
+  includes `word/vbaProject.bin`: macro code is structurally present.
+  Members were listed by name only — never extracted.
+- **Clean control** — `remittance-slip.pdf` claims
+  `application/pdf` and its magic bytes agree: no observations. (A
+  benign attachment must stay quiet.)
+- **`password-protected`** — `backup-codes.zip` has one encrypted
+  member (`secret.txt`). The encryption flag was detected; the
+  content was never read and no password was attempted. Its
+  uninspectability is itself an observed fact.
+
+Safety bounds are part of the contract, not footnotes: archive
+inventory is capped (`max_archive_entries`, default 500) and
+depth-bounded (`max_archive_depth`, default 3) with warnings when
+limits bite; corrupt archives become warnings, never crashes; and
+there is deliberately **no `--extract` option** — attachment bytes
+never touch the filesystem.
+
+For the same data inside a full analysis, run `phishscope analyze
+--attachments <file>`: an `attachments_detail` block (records,
+observations, parser warnings, provenance `phishscope.attachments`
+v0.5.0) is appended to the human output and merged into `--json`.
+Use `--hash` on the focused command to print full SHA-256/MD5 hashes
+in human output (hashes are always present in `--json`).
+
+## What v0.5 does NOT do (honest limits)
+
+- **No verdicts.** Observations are facts with their basis attached;
+  the analyst judges. Heuristics arrive in v0.6 with explicit
+  limitations.
+- **No extraction, no execution, no rendering.** Attachment bytes
+  live in RAM only. There is no `--extract` option and no password
+  recovery — an encrypted archive's contents are unobserved, not
+  assumed.
+- **Identification is structural, not authoritative.** Magic bytes say
+  what the first bytes look like; a mismatch with the filename or
+  declared Content-Type is an observation, not proof of malice.
+  Unknown content is reported as unknown, never guessed.
+- **VBA detection is structural.** A `VBA` storage or
+  `vbaProject.bin` part means macro code is present in the container;
+  macros are never decompiled or executed, so behavior is unobserved.
+- **Archive inventory is bounded.** Deep nesting and huge member
+  counts are capped with warnings; anything beyond the caps is
+  unobserved, not absent.

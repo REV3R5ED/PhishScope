@@ -5,6 +5,52 @@ All notable changes to PhishScope are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-10-03
+
+Attachment forensics, in memory only (plan Phase 5).
+
+### Added
+- New `phishscope.attachments` package (stdlib only): `models`
+  (AttachmentRecord / AttachmentObservation / AttachmentAnalysis,
+  IdentifiedType, ArchiveInventory, OleInventory), `identify`
+  (magic-byte identification: PE, ELF, PDF, ZIP/OOXML, OLE,
+  gzip/RAR/7z, images, scripts, HTML/XML, text; unknown never
+  guessed), `archives` (ZIP inventory by name only — never extracted;
+  encrypted entries detected via flag and never read; nested
+  archives inventoried in memory with depth/entry caps), `ole`
+  (minimal OLE directory reader: storage/stream names only,
+  structural VBA detection), `observations` (observation-only
+  forensics), `analysis` (whole-message attachment analysis with
+  bounded MIME walk).
+- Observation-only attachment forensics (facts with basis, never
+  verdicts): `double-extension`, `extension-type-mismatch`,
+  `declared-mime-mismatch`, `executable-content`, `script-content`,
+  `macro-capable-format`, `vba-project-present`, `password-protected`,
+  `nested-archive`, `archive-member-executable`, `empty-attachment`,
+  `oversized-attachment`, `attachment-count`/`no-attachments`.
+- Safety boundary (tested): attachment bytes are analyzed in memory
+  only — never written to disk (no `--extract` option), never
+  executed, never rendered; no password attempts; corrupt archives
+  become warnings; new `AppConfig` caps (`max_archive_depth`,
+  `max_archive_entries`, `max_nested_member_bytes`,
+  `max_attachment_warn_bytes`).
+- CLI: `phishscope attachments <file.eml> [--json] [--hash]`;
+  `analyze --attachments` appends a section and merges an
+  `attachments_detail` block (provenance `phishscope.attachments`
+  v0.5.0) into `--json`; plugin registry gains the `attachments`
+  module (v0.5.0).
+- Docs: README v0.5 section, `docs/USAGE.md` scenario ("triage the
+  lure's attachments") with `docs/examples/invoice-scam-attachments.eml`
+  and genuine-output screenshot `docs/images/05-attachments.png`.
+
+### Safety
+- 37 new tests (193 total, 88.78% coverage): magic-byte table,
+  double extensions, MIME mismatches, macro-capable and VBA
+  fixtures (synthetic OLE built in-process), password-protected and
+  nested archives, depth/entry caps, no-disk-write and no-network
+  guarantees, malformed input. All binary fixtures synthesized at
+  test time — none committed.
+
 ## [0.4.0] — 2026-10-03
 
 URL/domain extraction & triage, fully offline (plan Phase 4).

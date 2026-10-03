@@ -45,13 +45,22 @@ See [docs/USAGE.md](docs/USAGE.md) for scenario walkthroughs.
 - **Honest offline boundary**: URLs are never fetched, hostnames are never resolved, shorteners are never expanded — verified by dedicated no-network tests that block all sockets. Human output is always defanged; `--json` carries exact values for tooling
 - **CLI**: `urls` renders the focused inventory with the offline boundary stated up front; `analyze --urls` appends a URL section and merges a `urls` block (with its own provenance, `phishscope.urls` v0.4.0) into `--json`; plugin registry gains the `urls` module (v0.4.0)
 
+## v0.5 — what works today
+
+- **Attachment forensics** (`phishscope attachments message.eml`, `phishscope analyze --attachments message.eml`): new `phishscope.attachments` package (stdlib only). In-memory inventory — attachment bytes are **never written to disk** (deliberately no `--extract` option), never executed, never rendered
+- **Magic-byte identification** (PE/MZ, ELF, PDF, ZIP/OOXML, OLE/legacy-Office, gzip, RAR, 7z, images, scripts, HTML/XML, text; unknown reported as unknown, never guessed), filename (verbatim), declared vs identified Content-Type, size, SHA-256 + MD5 (pivot hash)
+- **Observation-only attachment forensics**: `double-extension`, `extension-type-mismatch`, `declared-mime-mismatch`, `executable-content`, `script-content`, `macro-capable-format`, `vba-project-present` (structural: OLE `VBA` storage / OOXML `vbaProject.bin` — never decompiled, never executed), `password-protected` (encryption flag detected, contents never read, no password attempts), `nested-archive`, `archive-member-executable`, `empty-attachment`, `oversized-attachment` — every observation carries its basis; none is a verdict
+- **Archive inventory by name only**: ZIP members listed (never extracted), nested archives inventoried in memory with depth cap (`max_archive_depth`, default 3) and entry cap (`max_archive_entries`, default 500); corrupt archives become warnings, never crashes. Minimal OLE directory reader (storage/stream names only) for VBA detection
+- **Honest safety boundary**: verified by dedicated tests — analysis leaves the filesystem untouched, blocks all sockets, and malformed input never crashes
+- **CLI**: `attachments` renders the focused inventory with the safety boundary stated up front (`--hash` prints full hashes in human output; hashes are always in `--json`); `analyze --attachments` appends a section and merges an `attachments_detail` block (with its own provenance, `phishscope.attachments` v0.5.0) into `--json`; plugin registry gains the `attachments` module (v0.5.0)
+
 ## Roadmap
 
 - [x] **v0.1** — Safe .eml/MIME parser, hashes, raw preservation, normalized message model
 - [x] **v0.2** — Header & Received-chain forensics (ordered Received chain, observation-only analysis, IPv4/IPv6/domain indicators)
 - [x] **v0.3** — SPF/DKIM/DMARC analysis (Authentication-Results parsing, pass/fail/none + authenticating domain; fully offline, no signature verification)
 - [x] **v0.4** — URL/domain extraction & triage (visible URLs, href targets, defanged indicators, display-vs-destination mismatch; no auto-visiting)
-- [ ] **v0.5** — Attachment forensics (magic-byte type, extension/type mismatch, double extensions, risky types, archive inventory with strict limits; never execute)
+- [x] **v0.5** — Attachment forensics (magic-byte type, extension/type mismatch, double extensions, macro-capable formats with structural VBA detection, archive inventory with strict limits; in-memory only — never written to disk, never executed)
 - [ ] **v0.6** — Content & impersonation heuristics (urgency/credential/payment language, brand/domain mismatch; findings carry evidence + limitations)
 - [ ] **v0.7** — Threat-intel adapters (optional, cached, timeouts), indicator correlation, STIX/JSON export; observed vs enriched distinguished
 - [ ] **v0.8** — Case management (evidence registration, chain-of-custody audit, deterministic manifests, sanitized reports)

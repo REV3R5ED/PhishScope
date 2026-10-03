@@ -1,0 +1,55 @@
+From: Acme Billing <billing@acme-invoices.net>
+To: victim@northwind.example
+Subject: Past-due invoice =?utf-8?b?4oCU?= see attached
+Date: Fri, 02 Oct 2026 14:30:00 +0000
+Message-ID: <att-001@acme-invoices.net>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="===============8030192803527431905=="
+
+--===============8030192803527431905==
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+
+Please see the attached documents.
+
+--===============8030192803527431905==
+Content-Type: application/octet-stream
+Content-Transfer-Encoding: base64
+Content-Disposition: attachment; filename="Invoice_INV-4821.pdf.exe"
+MIME-Version: 1.0
+
+TVqQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQ
+kJCQkJCQkFBFIHN0dWIgZm9yIGZvcmVuc2ljIHRlc3Rz
+
+--===============8030192803527431905==
+Content-Type: application/octet-stream
+Content-Transfer-Encoding: base64
+Content-Disposition: attachment; filename="Payment_Instructions.docm"
+MIME-Version: 1.0
+
+UEsDBBQAAAAIAHMsQ10J29U4HwAAAB8AAAARAAAAd29yZC9kb2N1bWVudC54bWyzqcjNsStIrMxN
+zStRyMwrLikqTS7JzM8rttEHyQAAUEsDBBQAAAAIAHMsQ12vlzhzEgAAABAAAAATAAAAd29yZC92
+YmFQcm9qZWN0LmJpbktLzE7VLUtK1C0oys9KTS4BAFBLAQIUAxQAAAAIAHMsQ10J29U4HwAAAB8A
+AAARAAAAAAAAAAAAAACAAQAAAAB3b3JkL2RvY3VtZW50LnhtbFBLAQIUAxQAAAAIAHMsQ12vlzhz
+EgAAABAAAAATAAAAAAAAAAAAAACAAU4AAAB3b3JkL3ZiYVByb2plY3QuYmluUEsFBgAAAAACAAIA
+gAAAAJEAAAAAAA==
+
+--===============8030192803527431905==
+Content-Type: application/pdf
+Content-Transfer-Encoding: base64
+Content-Disposition: attachment; filename="remittance-slip.pdf"
+MIME-Version: 1.0
+
+JVBERi0xLjQKJeLjz9MKZmFrZSBwZGYgYm9keSBmb3IgdGVzdHMK
+
+--===============8030192803527431905==
+Content-Type: application/zip
+Content-Transfer-Encoding: base64
+Content-Disposition: attachment; filename="backup-codes.zip"
+MIME-Version: 1.0
+
+UEsDBBQAAQAAAAAAAAAAAAAAEAAAABAAAAAKAAAAc2VjcmV0LnR4dFhYWFhYWFhYWFhYWFhYWFhQ
+SwECFAAUAAEAAAAAAAAAAAAAABAAAAAQAAAACgAAAAAAAAAAAAAAAAAAAAAAc2VjcmV0LnR4dFBL
+BQYAAAAAAQABADgAAAA4AAAAAAA=
+
+--===============8030192803527431905==--

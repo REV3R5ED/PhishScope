@@ -25,17 +25,23 @@ v0.4: URL/domain extraction and triage — URLs from body text, HTML
 links, and headers, decomposed locally with observation-only
 analysis. Fully offline: never fetched, never resolved, shorteners
 never expanded; observations are facts, never verdicts.
+
+v0.5: attachment forensics — in-memory inventory (never written to
+disk, never executed): filename, declared vs magic-byte type,
+hashes, archive contents by name only, OLE directory structure.
+Observations are facts with basis, never verdicts.
 """
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"
 __author__ = "Pouya Shini Karim"
 __license__ = "MIT"
 
-from phishscope import auth, headers, parsers, urls
+from phishscope import attachments, auth, headers, parsers, urls
 from phishscope.core import config, hashing, logging, models, plugins, results
 
 __all__ = [
     "__version__",
+    "attachments",
     "auth",
     "config",
     "hashing",
